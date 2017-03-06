@@ -11,7 +11,7 @@ from nengo.builder import operator
 from nengo.builder.operator import DotInc, ElementwiseInc, SlicedCopy
 from nengo.builder.signal import Signal
 from nengo.utils.compat import iteritems, itervalues, zip_longest
-from nengo.utils.graphs import toposort, transitive_closure
+from nengo.utils.graphs import BidirectionalDAG, toposort, transitive_closure
 from nengo.utils.stdlib import Timer
 
 logger = logging.getLogger(__name__)
@@ -119,7 +119,7 @@ def optimize(model, dg, max_passes=None):
 
 class OpMergePass(object):
     def __init__(self, dg, model, sig_replacements):
-        self.dg = dg
+        self.dg = BidirectionalDAG(dg)
         self.model = model
         self.sig_replacements = sig_replacements
         self.sig2ops = defaultdict(list)
@@ -152,12 +152,12 @@ class OpMergePass(object):
         self.opinfo.clear()
 
         # --- Do an optimization pass
-        for op in self.dg:
+        for op in self.dg.forward:
             for s in op.all_signals:
                 self.sig2ops[s].append(op)
                 self.base2views[s.base].append(s)
-        self.step_order = toposort(self.dg)
-        self.dependents = transitive_closure(self.dg, self.step_order)
+        self.step_order = toposort(self.dg.forward)
+        self.dependents = transitive_closure(self.dg.forward, self.step_order)
 
         # --- Most of the magic happens here
         self.perform_merges()
@@ -284,6 +284,7 @@ class OpMergePass(object):
         been replaced.
         """
         merged_op, merged_sig = OpMerger.merge(tomerge.ops)
+        self.dg.merge(tomerge.ops, merged_op)
         self.merged.update(tomerge.ops)
         self.merged_dependents.update(tomerge.all_dependents)
         for op in tomerge.ops:
